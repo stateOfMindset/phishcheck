@@ -1,7 +1,6 @@
 services:
   db:
     image: pgvector/pgvector:pg16
-    container_name: phishcheck-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

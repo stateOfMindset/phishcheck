@@ -237,7 +237,7 @@ To reset the database completely: `docker compose down -v` and then `docker comp
 
 - *`CERTIFICATE_VERIFY_FAILED` errors:* antivirus HTTPS scanning (e.g. AVG, Avast) or a corporate proxy. PhishCheck already uses the operating system's certificate store through `truststore`. If `pip install` itself fails, use Python 3.10+ with a recent pip, which does the same.
 - *Port 5433 or 5000 already in use:* change `POSTGRES_PORT` or `FLASK_PORT` in `.env`.
-- *`/health` says the database is unreachable:* check that Docker Desktop is running and `docker compose ps` shows `phishcheck-db` as healthy.
+- *`/health` says the database is unreachable:* check that Docker Desktop is running and that `docker compose ps` shows the `db` service as healthy.
 
 ### 6. Tests
 
