@@ -106,11 +106,11 @@ def load_document(path: Path) -> Document:
         raise ValueError("front matter needs 'title' and source_type 'general' or 'college'")
 
     chunks: list[Chunk] = []
-    for section in re.split(r"(?m)^## ", body):
-        section = section.strip()
-        if not section:
+    # Element 0 is whatever precedes the first '## ' heading; it is not a section.
+    for section in re.split(r"(?m)^## ", body)[1:]:
+        heading, _, content = section.strip().partition("\n")
+        if not content.strip():
             continue
-        heading, _, content = section.partition("\n")
         for i, part in enumerate(_split_long(content.strip())):
             label = heading.strip() + (f" (part {i + 1})" if i else "")
             chunks.append(Chunk(heading=label, content=part,
