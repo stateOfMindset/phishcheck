@@ -89,4 +89,8 @@ def create_app() -> Flask:
 
 
 if __name__ == "__main__":
+    from server import rag
+    log.info("Loading the embedding model...")
+    rag.warm_up()
+    log.info("PhishCheck running at http://127.0.0.1:%s", config.FLASK_PORT)
     create_app().run(host="127.0.0.1", port=config.FLASK_PORT, debug=False)

@@ -155,20 +155,46 @@ def store(documents: list[Document]) -> int:
     return len(all_chunks)
 
 
-def retrieve(query: str, top_k: int = DEFAULT_TOP_K, min_score: float = MIN_SCORE) -> list[dict]:
+def retrieve(query: str, top_k: int = DEFAULT_TOP_K, min_score: float = MIN_SCORE,
+             source_type: str | None = None, vector=None) -> list[dict]:
     """Most similar chunks to `query`, best first, each with its cosine similarity score.
 
     Chunks scoring below `min_score` are dropped, so an off-topic question returns an empty
     list instead of loosely related text. Returns [] when the knowledge base is empty.
+    `source_type` limits the search to 'general' or 'college' documents.
     """
-    vector = embed_query(query)
+    vector = embed_query(query) if vector is None else vector
     with db.pool().connection() as conn:
         rows = conn.execute(
             """SELECT d.title, d.source_type, d.source_url, d.source_file,
-                      c.heading, c.content, 1 - (c.embedding <=> %s) AS score
+                      c.heading, c.content, 1 - (c.embedding <=> %(v)s) AS score
                FROM chunks c JOIN documents d ON d.id = c.document_id
-               ORDER BY c.embedding <=> %s
-               LIMIT %s""",
-            (vector, vector, top_k),
+               WHERE %(type)s::text IS NULL OR d.source_type = %(type)s
+               ORDER BY c.embedding <=> %(v)s
+               LIMIT %(k)s""",
+            {"v": vector, "type": source_type, "k": top_k},
         ).fetchall()
     return [{**r, "score": round(float(r["score"]), 3)} for r in rows if r["score"] >= min_score]
+
+
+def retrieve_balanced(query: str, top_k: int = DEFAULT_TOP_K) -> list[dict]:
+    """Best chunks from the college procedures AND the general guides, merged by score.
+
+    A college student's question usually matches the college procedures most strongly, which
+    would crowd out the general guides (e.g. the detailed MFA guidance). Searching each kind
+    separately and taking half from each keeps both the college-specific steps and the broader
+    advice in the answer; if one kind has nothing relevant, the other fills the slots.
+    """
+    vector = embed_query(query)
+    college = retrieve(query, top_k=top_k, source_type="college", vector=vector)
+    general = retrieve(query, top_k=top_k, source_type="general", vector=vector)
+    half = top_k // 2
+    picked = college[:half] + general[:half]
+    leftovers = sorted(college[half:] + general[half:], key=lambda c: c["score"], reverse=True)
+    picked += leftovers[:top_k - len(picked)]
+    return sorted(picked, key=lambda c: c["score"], reverse=True)
+
+
+def warm_up() -> None:
+    """Load the embedding model now instead of on the first question (it takes several seconds)."""
+    embed_query("warm up")
