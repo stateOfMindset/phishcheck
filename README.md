@@ -43,46 +43,41 @@ PhishCheck never claims a message is safe. It separates what the student reporte
 Three tiers: a plain HTML/JavaScript client, a Flask server that owns all AI logic, and PostgreSQL with pgvector running in Docker.
 
 ```mermaid
-flowchart LR
-    subgraph Client["Client (HTML + vanilla JS)"]
-        UI["Chat UI<br/>route badges, findings, sources"]
-    end
+flowchart TD
+    U["Student's browser<br/>HTML + vanilla JS chat"]
 
-    subgraph Server["Flask server (Python)"]
+    subgraph S["Flask server (Python)"]
         API["REST API<br/>POST /chat · GET /history · GET /health"]
         R{"Agent Router<br/>Claude Haiku, JSON output<br/>+ rule-based fallback"}
-        T["Tools module<br/>inspect_url<br/>inspect_email_headers"]
-        RAG["RAG module<br/>embed query, pgvector search"]
-        LLM["LLM module (LangChain LCEL)<br/>prompt + memory → Sonnet<br/>retry → Haiku fallback"]
-        F["Response formatter<br/>answer, routes, sources, tool calls"]
+        T["Tools<br/>inspect_url · inspect_email_headers<br/>chosen by Claude Haiku"]
+        G["RAG<br/>bge-small embeddings<br/>pgvector similarity search"]
+        L["LLM module (LangChain LCEL)<br/>prompt + memory → Claude Sonnet<br/>retry → Claude Haiku fallback"]
+        F["Response formatter<br/>answer · routes + reason · sources · findings"]
     end
 
-    subgraph DB["PostgreSQL 16 + pgvector (Docker)"]
-        H[("sessions<br/>messages")]
-        L[("tool_calls")]
-        V[("documents<br/>chunks + embeddings")]
+    subgraph D["PostgreSQL 16 + pgvector (Docker)"]
+        M[("sessions<br/>messages")]
+        TC[("tool_calls")]
+        K[("documents<br/>chunks + vectors")]
     end
 
-    ANT(["Anthropic API"])
-
-    UI -- "JSON over HTTP" --> API
+    U <-- "JSON request / response" --> API
     API --> R
     R -- "tool" --> T
-    R -- "rag" --> RAG
-    R -- "direct" --> LLM
-    T -- "findings refine the search" --> RAG
-    T --> LLM
-    RAG --> LLM
-    LLM --> F --> API
-    API -- "JSON" --> UI
+    R -- "rag" --> G
+    R -- "direct" --> L
+    T -- "findings refine the query" --> G
+    T --> L
+    G --> L
+    L --> F
+    F -- "answer JSON" --> API
 
-    R -. "classify" .-> ANT
-    T -. "tool selection" .-> ANT
-    LLM -. "answer" .-> ANT
-    API -- "history, memory" --- H
-    T -- "log every call" --- L
-    RAG -- "cosine similarity" --- V
+    API -.- M
+    T -.- TC
+    G -.- K
 ```
+
+Solid arrows are the request path; dotted lines are database reads and writes. The router, the tool selection and the LLM module call Claude through the Anthropic API.
 
 **Request flow for `POST /chat`:**
 
