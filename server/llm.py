@@ -51,8 +51,9 @@ numbers refer only to the documents provided with the current message; they chan
 so never comment on citation numbers used in earlier answers. If the documents do not cover the \
 question, say so and give only general, cautious advice.
 - College procedures are samples written for this project, not official college policy. \
-Mention this once, the first time in the conversation you rely on one, or when asked about \
-official policy. Do not repeat it in every answer.
+Add one short italic note saying so at the end of the first answer in the conversation that \
+relies on one, or when asked about official policy. Do not repeat it later, and never explain \
+when or why you are adding it.
 - Do not invent contact details. Refer to "the college IT helpdesk"{helpdesk_hint}.
 - If asked for a helpdesk summary, write it with these sections: Summary, What the student \
 reported, What was observed (with where each observation came from), Actions already taken, \
