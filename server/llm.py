@@ -162,6 +162,10 @@ def answer(message: str, history: list[dict], sources: list[dict],
             "context": build_context(sources, tool_results, routes),
             "message": message,
         })
+    except anthropic.AuthenticationError as exc:
+        log.error("Anthropic rejected the API key: %s", exc)
+        raise LLMUnavailable("The server's Anthropic API key is missing or invalid. Check "
+                             "ANTHROPIC_API_KEY in .env and restart the server.") from exc
     except Exception as exc:
         log.error("Answer generation failed on both models: %s: %s", type(exc).__name__, exc)
         raise LLMUnavailable("The AI service is unavailable right now. Please try again in a "

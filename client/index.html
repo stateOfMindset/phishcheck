@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhishCheck</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="m8.5 12 2.5 2.5 4.5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <div>
+        <h1>PhishCheck</h1>
+        <p class="subtitle">Phishing triage assistant &middot; <span id="college-name">Netanya Academic College</span></p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span id="health" class="health" title="Server status">checking&hellip;</span>
+      <button id="new-chat" class="ghost" type="button">New conversation</button>
+    </div>
+  </header>
+
+  <main id="chat" class="chat" aria-live="polite">
+    <section id="welcome" class="welcome">
+      <h2>Got a suspicious message?</h2>
+      <p>Paste the message, a link or the email headers and tell me what happened. I check what can be checked, explain the warning signs, and walk you through what to do. I never open links.</p>
+      <div class="examples">
+        <button class="example" type="button" data-route="RAG">I typed my college password into a page from an email. What should I do?</button>
+        <button class="example" type="button" data-route="Tool">Is this link safe? https://netanya-ac-il.com/login</button>
+        <button class="example" type="button" data-route="Tool + RAG">I clicked hxxps://login-netanya.ac.il.verify-account[.]top and entered my password, what now?</button>
+        <button class="example" type="button" data-route="Direct">What is phishing, in one sentence?</button>
+      </div>
+    </section>
+  </main>
+
+  <form id="composer" class="composer">
+    <textarea id="input" rows="1" placeholder="Describe what happened, or paste a link or email headers&hellip;" dir="auto" autocomplete="off" required></textarea>
+    <button id="send" type="submit" class="primary">Send</button>
+  </form>
+  <p class="footnote">PhishCheck inspects text only and can be wrong. For an account you think is compromised, contact the college IT helpdesk.</p>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,8 +1,10 @@
-"""Flask entry point. Run with:  python -m server.app"""
+"""Flask application: client files and the REST API. Started by run.py."""
 import logging
 import uuid
 
+import psycopg
 from flask import Flask, jsonify, request, send_from_directory
+from psycopg_pool import PoolTimeout
 from werkzeug.exceptions import HTTPException
 
 from server import config, db, pipeline
@@ -80,17 +82,16 @@ def create_app() -> Flask:
     def http_error(exc: HTTPException):
         return error(exc.code or 500, exc.description)
 
+    @app.errorhandler(psycopg.OperationalError)
+    @app.errorhandler(PoolTimeout)
+    def database_error(exc: Exception):
+        log.error("Database unavailable: %s", exc)
+        return error(503, "The database is unavailable. Check that the Docker container is "
+                          "running (docker compose up -d) and try again.")
+
     @app.errorhandler(Exception)
     def unexpected_error(exc: Exception):
         log.exception("Unhandled error")
         return error(500, "Something went wrong on the server. Please try again.")
 
     return app
-
-
-if __name__ == "__main__":
-    from server import rag
-    log.info("Loading the embedding model...")
-    rag.warm_up()
-    log.info("PhishCheck running at http://127.0.0.1:%s", config.FLASK_PORT)
-    create_app().run(host="127.0.0.1", port=config.FLASK_PORT, debug=False)

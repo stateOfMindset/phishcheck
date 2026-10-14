@@ -26,6 +26,7 @@ def pool() -> ConnectionPool:
             kwargs={"row_factory": dict_row, "autocommit": True},
             configure=_configure,
             open=True,
+            timeout=5,  # fail fast with a clear error when the DB container is down
         )
     return _pool
 
