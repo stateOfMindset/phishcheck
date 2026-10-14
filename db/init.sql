@@ -61,7 +61,7 @@ CREATE TABLE chunks (
     chunk_index  INTEGER NOT NULL,
     heading      TEXT NOT NULL,
     content      TEXT NOT NULL,
-    -- all-MiniLM-L6-v2 produces 384-dimensional embeddings.
+    -- BAAI/bge-small-en-v1.5 produces 384-dimensional embeddings.
     embedding    vector(384) NOT NULL,
     UNIQUE (document_id, chunk_index)
 );

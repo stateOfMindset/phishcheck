@@ -36,7 +36,7 @@ COLLEGE_DOMAIN = os.getenv("COLLEGE_DOMAIN", "ravenmoor.edu").lower()
 # Left empty unless you know the real address; answers then refer to "the college IT helpdesk".
 HELPDESK_EMAIL = os.getenv("HELPDESK_EMAIL", "").strip()
 
-EMBEDDING_MODEL =os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 CLIENT_DIR = PROJECT_ROOT / "client"
 
