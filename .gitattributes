@@ -1,0 +1,4 @@
+# Keep LF line endings in the repo so files mounted into the Linux DB container stay clean.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

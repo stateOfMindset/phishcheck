@@ -31,7 +31,11 @@ DATABASE_URL = (
     f"/{_require('POSTGRES_DB')}"
 )
 
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+COLLEGE_NAME = os.getenv("COLLEGE_NAME", "Ravenmoor College")
+COLLEGE_DOMAIN = os.getenv("COLLEGE_DOMAIN", "ravenmoor.edu").lower()
+HELPDESK_EMAIL = os.getenv("HELPDESK_EMAIL", f"helpdesk@{COLLEGE_DOMAIN}")
+
+EMBEDDING_MODEL =os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 CLIENT_DIR = PROJECT_ROOT / "client"
 
