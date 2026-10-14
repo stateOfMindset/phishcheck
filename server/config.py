@@ -33,7 +33,8 @@ DATABASE_URL = (
 
 COLLEGE_NAME = os.getenv("COLLEGE_NAME", "Ravenmoor College")
 COLLEGE_DOMAIN = os.getenv("COLLEGE_DOMAIN", "ravenmoor.edu").lower()
-HELPDESK_EMAIL = os.getenv("HELPDESK_EMAIL", f"helpdesk@{COLLEGE_DOMAIN}")
+# Left empty unless you know the real address; answers then refer to "the college IT helpdesk".
+HELPDESK_EMAIL = os.getenv("HELPDESK_EMAIL", "").strip()
 
 EMBEDDING_MODEL =os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"

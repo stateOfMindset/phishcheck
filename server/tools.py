@@ -48,7 +48,7 @@ BRAND_ALIASES = {"outlook": "microsoft", "office365": "microsoft", "onedrive": "
 ALL_OFFICIAL = set().union(*OFFICIAL_DOMAINS.values())
 
 MULTI_PART_SUFFIXES = {"co.uk", "ac.uk", "org.uk", "gov.uk", "co.il", "ac.il", "org.il",
-                       "gov.il", "net.il", "com.au", "edu.au", "co.jp", "com.br", "co.in",
+                       "gov.il", "net.il", "muni.il", "k12.il", "idf.il", "com.au", "edu.au", "co.jp", "com.br", "co.in",
                        "co.za"}
 
 FREE_MAIL = {"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
