@@ -6,6 +6,22 @@ PhishCheck helps students of Netanya Academic College deal with suspicious messa
 
 Final project for *Practical Generative AI* (Python track).
 
+![PhishCheck answering a student who entered their password on a lookalike page](docs/screenshots/answer.jpg)
+
+### Highlights
+
+- **Agent router** (Claude Haiku, structured JSON output) that sends each message to tool use, retrieval, a direct answer, or tool use *and* retrieval, explains every decision, and falls back to deterministic rules when the API is unavailable.
+- **Two security tools** in the Anthropic tool-use schema: a URL analyser (punycode and mixed-alphabet lookalikes, `user@host` tricks, brand impersonation, typosquatting, redirects, defanged links) and an email-header analyser (SPF/DKIM/DMARC, Reply-To and Return-Path mismatches, display-name spoofing). Neither ever opens a link.
+- **RAG over PostgreSQL + pgvector** with heading-based chunking, local embeddings, a relevance cutoff calibrated on test queries, and balanced retrieval across college procedures and general guidance.
+- **LangChain LCEL** answer chain with conversation memory stored in PostgreSQL, retries, and a fallback model.
+- **Never says "safe"**: answers separate what the student reported, what the tools found, and what is still uncertain. Pasted content is treated as untrusted data (prompt-injection aware).
+- **Hebrew and English**, a plain HTML/JavaScript client, a Dockerized database, 28 tests, and a fresh-clone install verified by following this README.
+
+<p>
+  <img src="docs/screenshots/findings.jpg" alt="Link-check findings and retrieved sources with similarity scores" width="49%">
+  <img src="docs/screenshots/welcome.jpg" alt="Start screen with example questions for each route" width="49%">
+</p>
+
 ---
 
 <a id="english"></a>
@@ -264,6 +280,7 @@ phishcheck/
 ├── scripts/ingest.py       Loads the knowledge base into pgvector
 ├── db/init.sql             Database schema
 ├── tests/                  Pytest tests
+├── docs/screenshots/       Images used in this README
 ├── docker-compose.yml      PostgreSQL 16 + pgvector
 ├── run.py                  Starts the server
 ├── requirements.txt        Pinned Python dependencies
