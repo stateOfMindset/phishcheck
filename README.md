@@ -2,20 +2,21 @@
 
 **[English](#english) · [עברית](#עברית)**
 
-PhishCheck helps students of Netanya Academic College deal with suspicious messages. A student pastes a message, a link or email headers and says what happened; PhishCheck inspects what can be inspected, explains the warning signs, retrieves the right procedure and writes a summary for the IT helpdesk.
+PhishCheck helps students at Netanya Academic College check suspicious messages and figure out what to do next. A student can paste a message, a link or email headers, and explain what happened. The app checks the details it can, looks up the relevant procedure, and can put together a report for the IT helpdesk.
 
-Final project for *Practical Generative AI* (Python track).
+Final project for *Advanced AI-Assisted Programming*.
 
 ![PhishCheck answering a student who entered their password on a lookalike page](docs/screenshots/answer.jpg)
 
-### Highlights
+### What the app does
 
-- **Agent router** (Claude Haiku, structured JSON output) that sends each message to tool use, retrieval, a direct answer, or tool use *and* retrieval, explains every decision, and falls back to deterministic rules when the API is unavailable.
-- **Two security tools** in the Anthropic tool-use schema: a URL analyser (punycode and mixed-alphabet lookalikes, `user@host` tricks, brand impersonation, typosquatting, redirects, defanged links) and an email-header analyser (SPF/DKIM/DMARC, Reply-To and Return-Path mismatches, display-name spoofing). Neither ever opens a link.
-- **RAG over PostgreSQL + pgvector** with heading-based chunking, local embeddings, a relevance cutoff calibrated on test queries, and balanced retrieval across college procedures and general guidance.
-- **LangChain LCEL** answer chain with conversation memory stored in PostgreSQL, retries, and a fallback model.
-- **Never says "safe"**: answers separate what the student reported, what the tools found, and what is still uncertain. Pasted content is treated as untrusted data (prompt-injection aware).
-- **Hebrew and English**, a plain HTML/JavaScript client, a Dockerized database, 28 tests, and a fresh-clone install verified by following this README.
+The router decides whether a message needs a tool, a search through the knowledge base (RAG), a direct answer, or both a tool and RAG. It also explains why it chose that route, so you can see how the message was handled.
+
+There are two tools: one checks URLs and the other checks email headers. They work on the pasted text without opening links. The knowledge base contains general phishing guidance and sample college procedures, stored in PostgreSQL with pgvector. LangChain LCEL connects the answer prompt, conversation history, retries and fallback model.
+
+The app works in Hebrew and English, with a plain HTML/JavaScript interface and a database running in Docker. There are 40 automated tests. The setup below was also checked on a fresh clone. Screenshots of the demo (RAG, tool and direct answers) and of the security testing are in [DEMO.md](DEMO.md).
+
+A link with no obvious warning signs can still be dangerous. The assistant is instructed to explain what it found and what it cannot check, rather than tell the student that something is safe.
 
 <p>
   <img src="docs/screenshots/findings.jpg" alt="Link-check findings and retrieved sources with similarity scores" width="49%">
@@ -42,17 +43,17 @@ Final project for *Practical Generative AI* (Python track).
 
 ### 1. The problem and the user
 
-A student gets an email saying their college account will be closed today, with a login link. Security guidance exists, but it is hard to find the right procedure and apply it in the moment, and what to do depends on what already happened: only receiving the message, opening the link, entering a password, and entering an MFA code each need different steps.
+A student gets an email saying their college account will be closed today unless they log in through a link. What should they do? That depends on whether they only received the email, opened the link, or already entered their password and possibly an MFA code.
 
-**User:** a student of Netanya Academic College who received a suspicious message, or already acted on one.
+PhishCheck is meant for a student in that situation. Security guidance is available, but finding the right steps while dealing with the message can be difficult. The app uses the student's description, tool findings and retrieved procedures to explain the next steps.
 
-**Three supported scenarios:**
+It covers three scenarios:
 
-1. A suspicious message was received, with no interaction.
-2. A suspicious link was opened.
-3. A password (and possibly an MFA code) was entered on a page that may be fake.
+1. The student received a suspicious message and has not interacted with it.
+2. They opened a suspicious link.
+3. They entered a password, and possibly an MFA code, on a page that may be fake.
 
-PhishCheck never claims a message is safe. It separates what the student reported, what the tools observed, what is still uncertain, and what the procedure recommends.
+The answer should make clear what the student reported, what the tools actually found and what is still unknown. It should not claim that a message is safe.
 
 ### 2. Architecture
 
@@ -108,46 +109,58 @@ Solid arrows are the request path; dotted lines are database reads and writes. T
 
 #### Agent Router (`server/router.py`)
 
-- **Primary:** Claude Haiku 5.5 with structured JSON output (`routes`, `reason`, `search_query`), run through an LCEL chain (`prompt | model.with_structured_output(...)`).
-- The router also writes a **self-contained English search query**. Hebrew questions and follow-ups such as "so what do I do now?" still retrieve the right documents, because the query includes facts from earlier turns.
-- **Fallback:** deterministic regex and keyword rules if the LLM call fails (network error, invalid key). The UI shows which router made the decision.
-- **Explainable:** every decision has a one-sentence reason, shown under the answer in the UI and stored in `messages.route_reason`.
-- Several routes in one message always run in the order `tool` → `rag`, so retrieval can use what the tools found.
+Claude Haiku 5.5 reads the message and returns structured JSON with `routes`, `reason` and `search_query`. This runs through an LCEL chain: `prompt | model.with_structured_output(...)`.
+
+The search query is written in English and includes the relevant context from earlier messages. For example, if the student asks "so what do I do now?", the query still needs to include what happened before. This also allows Hebrew questions to search the English knowledge base.
+
+If the model call fails, regex and keyword rules choose the route instead. The interface shows which router was used, along with a one-sentence explanation stored in `messages.route_reason`.
+
+When a message needs both tools and RAG, the tools run first. Their findings can then be included in the search query.
 
 #### Tools (`server/tools.py`, `server/tool_runner.py`)
 
-Two custom tools defined in the **Anthropic tool-use schema** (`name`, `description`, `input_schema`). Both analyse text only. They never visit a URL, resolve DNS, open an attachment or connect to a mailbox.
+Both tools use the Anthropic tool-use schema: `name`, `description` and `input_schema`. They only analyse the text they receive. They do not visit websites, resolve DNS, open attachments or connect to a mailbox.
 
-| Tool | What it does |
+| Tool | What it checks |
 |---|---|
-| `inspect_url` | Parses a pasted link (defanged forms like `hxxp://evil[.]com` accepted) and reports the real hostname and registrable domain, `user@host` tricks, raw IP hosts, punycode and mixed-alphabet lookalikes, brand impersonation (brand name in a subdomain, lookalike characters, near-identical spelling such as `netanyaa.ac.il`), link shorteners, embedded redirects, risky TLDs and more. |
-| `inspect_email_headers` | Extracts From, Reply-To, Return-Path, SPF/DKIM/DMARC results, DKIM signing domains and the claimed origin IP, and flags mismatches: replies going to another domain, display-name spoofing, a free-mail sender claiming to be an organisation, lookalike sender domains, failed or missing authentication. |
+| `inspect_url` | The hostname and registrable domain, `user@host` tricks, IP addresses used as hosts, punycode, mixed alphabets, brand impersonation and similar spellings such as `netanyaa.ac.il`. It also checks shorteners, embedded redirects and risky TLDs. Defanged links such as `hxxp://evil[.]com` are accepted. |
+| `inspect_email_headers` | From, Reply-To, Return-Path, SPF/DKIM/DMARC results, DKIM signing domains and the claimed origin IP. It flags mismatched domains, display-name spoofing, free-mail accounts claiming to represent an organisation, lookalike domains and failed or missing authentication. |
 
-Each result has an overall assessment (`high_risk_indicators`, `warning_signs` or `no_structural_red_flags`) and an explicit list of limitations, so the model never turns "no red flags" into "safe".
+The result includes an assessment (`high_risk_indicators`, `warning_signs` or `no_structural_red_flags`) and the limits of the check. Finding no structural red flags does not prove the link or email is safe.
 
-Tool selection: Claude Haiku receives the tool schemas and decides which tool(s) to call with which input (`tool_choice: auto`; the 5.5 models do not accept forced tool use). If it calls none, or the API fails, links and header blocks are extracted with regular expressions instead. Every call is stored in `tool_calls` with its input, output, success flag, error and duration.
+Claude Haiku receives the schemas and chooses the tools and inputs using `tool_choice: auto`; the 5.5 models do not accept forced tool use. If it chooses no tool, or the API call fails, the app uses regular expressions to extract links and header blocks. Each tool call is saved in `tool_calls`, including its input, output, success status, error and duration.
 
 #### RAG (`server/rag.py`, `scripts/ingest.py`, `knowledge/`)
 
-- **Knowledge base:** 14 Markdown documents.
-  - 10 general guides written for this project, based on public guidance from CISA and the UK NCSC: warning signs, verifying a message, clicked links, entered passwords, MFA codes and fatigue, attachments, reporting, account recovery, email authentication, SMS/phone/QR phishing.
-  - 4 **sample** college procedures: suspicious message, clicked link, credential exposure, and how to write a helpdesk report. They contain `{{COLLEGE_NAME}}`, `{{COLLEGE_DOMAIN}}` and `{{HELPDESK}}` placeholders filled from `.env` at ingestion.
-- **Chunking strategy:** one chunk per `##` section. Every section is written as one self-contained step or idea, so splitting on headings keeps numbered procedures whole, where fixed-size windows would cut them in half. The document title and section heading are prepended to the text that is embedded. Sections over 1,800 characters (none at present) are split on paragraph boundaries. Result: 69 chunks.
-- **Embeddings:** `BAAI/bge-small-en-v1.5` (384 dimensions, up to 512 tokens), run locally with sentence-transformers. No extra API key is needed; the model (~130 MB) is downloaded once.
-- **Vector store: PostgreSQL + pgvector**, in the same database container as the relational data, with an HNSW index on cosine distance.
-- **Retrieval:** cosine similarity with a calibrated relevance cutoff of 0.62. On test queries, on-topic questions scored 0.65 and above, and off-topic ones ("how does a firewall work?") at most about 0.61, so off-topic questions retrieve nothing instead of loosely related text. College procedures and general guides are searched separately and merged (two of each), so an answer gets both the college-specific steps and the broader advice. Sources are returned with their scores and shown in the UI.
+The knowledge base has 14 Markdown documents: 10 general guides and 4 sample college procedures.
+
+The general guides were written for the project using public CISA and UK NCSC guidance. They cover warning signs, message verification, clicked links, password exposure, MFA codes and fatigue, attachments, reporting, account recovery, email authentication, and SMS, phone and QR phishing.
+
+The college procedures cover suspicious messages, clicked links, exposed credentials and helpdesk reports. These are examples for the course project. The `{{COLLEGE_NAME}}`, `{{COLLEGE_DOMAIN}}` and `{{HELPDESK}}` placeholders are filled from `.env` during ingestion.
+
+**Chunking.** Each `##` section becomes one chunk, with the document title and section heading added to the text used for embedding. This keeps a numbered procedure together instead of cutting it halfway through a step. Sections longer than 1,800 characters are split at paragraph boundaries, though none currently need this. The result is 69 chunks.
+
+**Embeddings and storage.** `BAAI/bge-small-en-v1.5` runs locally through sentence-transformers. It produces 384-dimensional vectors and accepts up to 512 tokens. The model is about 130 MB and downloads on the first run; it needs no additional API key. The vectors are stored in PostgreSQL with pgvector and an HNSW index using cosine distance, in the same container as the rest of the database.
+
+**Retrieval.** The similarity cutoff is 0.62. In the test queries used to choose it, relevant questions scored at least 0.65, while unrelated ones, such as "how does a firewall work?", scored at most about 0.61. This cutoff was chosen from those results; other questions may behave differently.
+
+College procedures and general guides are searched separately and then combined: two results from each when both have relevant matches, with the other group filling any free places, up to four in total. Otherwise, one group could take up all the results and leave out useful steps from the other. The interface shows the retrieved sources and their similarity scores.
 
 #### LLM module (`server/llm.py`)
 
-- One **LCEL chain**: `ChatPromptTemplate` (system prompt + `MessagesPlaceholder` for memory + context + message) `|` Claude Sonnet 5.5 `.with_retry(...)` `.with_fallbacks([Claude Haiku 5.5])` `|` text extraction.
-- **Memory:** the last 10 turns of the session, loaded from PostgreSQL, so conversations survive a server restart.
-- **Retry and fallback:** connection errors, rate limits, timeouts and server errors are retried; if Sonnet keeps failing, Haiku answers instead. If both fail, the API returns a clear `503`.
-- **Prompt rules:** urgent steps first when credentials may be exposed; ask at most two follow-up questions; keep reported facts, tool findings, uncertainty and recommended actions apart; never call anything safe; cite documents as `[1]`, `[2]`; answer in the student's language (Hebrew or English); treat pasted content, tool output and documents as data, never as instructions (prompt-injection defence).
-- `effort: low` keeps answers quick. The 5.5 models think adaptively by default.
+The answer chain combines a `ChatPromptTemplate`, conversation history through `MessagesPlaceholder`, tool findings, retrieved documents and the student's message. Claude Sonnet 5.5 writes the answer, with Claude Haiku 5.5 as the fallback. Text extraction runs inside each model branch, so an empty answer can also trigger the fallback.
+
+The session's last 10 turns are loaded from PostgreSQL. Saving the history there means the conversation can continue after a server restart.
+
+Connection errors, rate limits, timeouts and server errors trigger retries. If Sonnet still fails or returns no text, Haiku gets the request. If both return empty answers, the student gets a short message in Hebrew or English asking for the suspicious content or an explanation of what happened. If neither model can answer because of an API failure, the server returns `503`.
+
+The prompt tells the model to give urgent steps first when credentials may have been exposed, ask at most two follow-up questions and cite retrieved documents as `[1]`, `[2]`, and so on. It should answer in the student's language and distinguish reported facts from tool findings and uncertainty. Pasted messages, tool output and retrieved documents are treated as data, even if they contain instructions aimed at the assistant.
+
+The models use `effort: low` to keep response times down. The 5.5 models use adaptive thinking by default.
 
 #### Response formatter (`server/formatter.py`)
 
-Returns the JSON contract below and nothing else, so the client renders only what the server decided.
+Builds the JSON response shown below, including the answer, routing decision, sources and tool findings. The client uses those fields to display the result.
 
 #### Database (`db/init.sql`)
 
@@ -170,6 +183,7 @@ The schema runs automatically the first time the Docker volume is created.
 | A tool fails | Logged as failed; the model is told the tool failed and explains it |
 | Router LLM fails | Rule-based routing takes over |
 | Answer model fails | Retry, then fallback model, then `503` with a message (a specific message for an invalid API key) |
+| Too many requests from one IP | `429` with `Retry-After`; the default limits are 10 messages per minute and 200 per day |
 | Database down | `503` "The database is unavailable…"; `/health` reports `unreachable` |
 | Any other unexpected error | Logged; `500` with a generic message, never a stack trace |
 
@@ -256,7 +270,7 @@ To reset the database completely: `docker compose down -v` and then `docker comp
 python -m pytest
 ```
 
-28 tests cover both tools (lookalike domains, defanged links, display-name spoofing, failed authentication, a legitimate email that must not be called safe, invalid input) and the chunking (placeholders, numbered steps kept together, long sections, invalid documents). They need no database and no API key.
+The project has 40 automated tests. They cover URL and email-header checks, document chunking, empty model answers and rate limiting. Cases include lookalike domains, defanged links, spoofed display names, failed authentication, invalid input and legitimate-looking messages that must still not be called safe. The chunking tests check placeholder replacement, complete numbered steps, long sections and invalid documents. These tests need no running database or API key.
 
 ### 7. Project structure
 
@@ -272,6 +286,7 @@ phishcheck/
 │   ├── rag.py              Chunking, embeddings, pgvector retrieval
 │   ├── llm.py              LCEL answer chain, memory, retry/fallback
 │   ├── formatter.py        JSON response contract
+│   ├── ratelimit.py        Per-IP rate limit for /chat
 │   ├── db.py               PostgreSQL access
 │   └── config.py           Settings from .env
 ├── knowledge/
@@ -281,6 +296,8 @@ phishcheck/
 ├── db/init.sql             Database schema
 ├── tests/                  Pytest tests
 ├── docs/screenshots/       Images used in this README
+├── docs/demo/              Screenshots used in DEMO.md
+├── DEMO.md                 Demo and security-testing screenshots
 ├── docker-compose.yml      PostgreSQL 16 + pgvector
 ├── run.py                  Starts the server
 ├── requirements.txt        Pinned Python dependencies
@@ -293,6 +310,7 @@ phishcheck/
 - The tools inspect structure only. They cannot see the page behind a link or the content of an attachment, and they cannot prove a message is safe.
 - Pasted headers can be edited by whoever pastes them, so authentication results are only as reliable as their source.
 - The knowledge base and embeddings are in English. Hebrew questions work because the router writes an English search query.
+- There are no user accounts, and conversations are kept indefinitely. The app is a course project; these privacy and access limitations matter if it is made available to other users.
 
 ### 9. Sources and AI use
 
@@ -301,7 +319,7 @@ General guidance was written for this project, based on:
 - CISA: [Recognize and Report Phishing](https://www.cisa.gov/secure-our-world/recognize-and-report-phishing), [Turn On MFA](https://www.cisa.gov/secure-our-world/turn-mfa)
 - UK NCSC: [Phishing scams: how to spot and report them](https://www.ncsc.gov.uk/collection/phishing-scams), [Recovering a hacked account](https://www.ncsc.gov.uk/guidance/recovering-a-hacked-account), [Report a scam email](https://www.ncsc.gov.uk/collection/phishing-scams/report-scam-email)
 
-This project was built with the help of Claude (Anthropic) as a coding assistant; commits it contributed to are marked `Co-Authored-By: Claude`.
+Claude (Anthropic) was used as a coding assistant during development. Commits with Claude contributions are marked `Co-Authored-By: Claude`. The documentation was also rewritten with help from ChatGPT/Codex.
 
 ---
 
@@ -324,17 +342,17 @@ This project was built with the help of Claude (Anthropic) as a coding assistant
 
 ### 1. הבעיה והמשתמש
 
-סטודנט מקבל מייל שאומר שהחשבון שלו במכללה ייסגר היום, ובתוכו קישור להתחברות. הנחיות אבטחה קיימות, אבל קשה למצוא את הנוהל הנכון וליישם אותו ברגע האמת. בנוסף, מה שצריך לעשות תלוי במה שכבר קרה: קבלת ההודעה בלבד, פתיחת הקישור, הזנת סיסמה והזנת קוד אימות דורשים כל אחד צעדים אחרים.
+סטודנט מקבל מייל שאומר שהחשבון שלו במכללה ייסגר היום אם הוא לא יתחבר דרך הקישור המצורף. מה הוא אמור לעשות עכשיו? זה תלוי במה שכבר קרה: האם הוא רק קיבל את המייל, פתח את הקישור, או גם הזין סיסמה ואולי קוד אימות.
 
-**המשתמש:** סטודנט במכללה האקדמית נתניה שקיבל הודעה חשודה, או שכבר פעל בעקבותיה.
+PhishCheck מיועד לסטודנט שנמצא במצב הזה. יש הנחיות אבטחה, אבל לא תמיד קל למצוא את הצעדים המתאימים בזמן שמתמודדים עם הודעה חשודה. האפליקציה משתמשת בתיאור של הסטודנט, בתוצאות הבדיקות ובנהלים שנשלפו ממאגר הידע כדי להסביר איך להמשיך.
 
-**שלושה תרחישים נתמכים:**
+הפרויקט מתייחס לשלושה מצבים:
 
-1. התקבלה הודעה חשודה, בלי שום אינטראקציה איתה.
-2. נפתח קישור חשוד.
-3. הוזנה סיסמה (ואולי גם קוד אימות) בדף שאולי מזויף.
+1. הסטודנט קיבל הודעה חשודה ועדיין לא עשה איתה דבר.
+2. הוא פתח קישור חשוד.
+3. הוא הזין סיסמה, ואולי גם קוד אימות, בדף שעלול להיות מזויף.
 
-העוזר אף פעם לא קובע שהודעה בטוחה. הוא מפריד בין מה שהסטודנט סיפר, מה שהכלים מצאו, מה שעדיין לא ידוע, ומה שהנוהל ממליץ לעשות.
+התשובה צריכה להבהיר מה הסטודנט סיפר, מה הכלים מצאו ומה עדיין לא ידוע. היא לא אמורה לקבוע שההודעה בטוחה.
 
 ### 2. ארכיטקטורה
 
@@ -351,27 +369,28 @@ This project was built with the help of Claude (Anthropic) as a coding assistant
 
 ### 3. רכיבים
 
-**הנתב.** מודל מהיר (Claude Haiku) מסווג כל הודעה ומחזיר תשובה במבנה קבוע: המסלולים, הסבר של משפט אחד, ושאילתת חיפוש באנגלית. בזכות השאילתה הזו, גם שאלה בעברית וגם שאלת המשך כמו "אז מה עושים עכשיו?" מוצאות את המסמכים הנכונים. אם המודל לא זמין, נכנסים לפעולה כללים קבועים מראש. ההסבר של הנתב מוצג למשתמש מתחת לכל תשובה.
+הנתב (`server/router.py`) משתמש ב־Claude Haiku כדי לבחור איך לטפל בהודעה. הוא מחזיר את המסלולים, הסבר קצר ושאילתת חיפוש באנגלית. השאילתה כוללת גם מידע מהשיחה הקודמת, כך ששאלת המשך כמו "אז מה עושים עכשיו?" עדיין יכולה למצוא את הנוהל המתאים. אם הקריאה למודל נכשלת, כללי חיפוש קבועים בוחרים את המסלול. המשתמש רואה את הבחירה ואת הסיבה לה.
 
-**הכלים.** שני כלים שמוגדרים במבנה הרשמי של הפעלת כלים במודלים של Anthropic. שניהם רק קוראים את הטקסט שהמשתמש נתן: הם לא נכנסים לאתרים, לא פותחים קבצים ולא מתחברים לתיבת דואר.
+יש שני כלי בדיקה, שמוגדרים לפי מבנה הפעלת הכלים של Anthropic. אחד בודק קישורים והשני בודק כותרות מייל. שניהם עובדים על הטקסט שהודבק, בלי להיכנס לאתר, לפתוח קובץ או להתחבר לתיבת דואר.
 
-- **בדיקת קישורים:** מגלה את כתובת האתר האמיתית, תרגילי הסוואה בתוך הקישור, כתובת מספרית במקום שם אתר, אותיות שמתחזות לאותיות אחרות, התחזות לשם של מוסד (למשל כתובת שדומה מאוד לכתובת המכללה), קישורים מקוצרים והפניות נסתרות.
-- **בדיקת פרטי מייל:** שולפת את השולח, את הכתובת שאליה תגיע התשובה ואת תוצאות בדיקות האימות של המייל, ומסמנת אי-התאמות, התחזות בשם התצוגה, חשבון דואר חינמי שמציג את עצמו כמוסד, ובדיקות אימות שנכשלו.
+- בדיקת הקישורים מחלצת את שם המתחם האמיתי ומחפשת ניסיונות הסוואה, כתובות IP, אותיות דומות, התחזות לשם של ארגון, קיצורי קישורים והפניות בתוך הכתובת.
+- בדיקת כותרות המייל משווה בין השולח, כתובת התשובה ו־Return-Path, ובודקת את תוצאות SPF, DKIM ו־DMARC. היא מסמנת אי־התאמות, התחזות בשם התצוגה ובדיקות אימות שנכשלו או חסרות.
 
-כל תוצאה כוללת הערכה כללית ורשימה מפורשת של מגבלות, כדי שהמודל לא יהפוך "לא נמצאו סימנים חשודים" ל"בטוח".
+כל תוצאה כוללת גם את מגבלות הבדיקה. אם לא נמצאו סימנים חשודים במבנה הקישור, זה עדיין לא אומר שהאתר בטוח. כל הפעלת כלי נשמרת במסד הנתונים עם הקלט, הפלט, משך הבדיקה ושגיאות אם היו.
 
-**אחזור מידע.** מאגר של 14 מסמכים: 10 מדריכים כלליים שנכתבו עבור הפרויקט על בסיס הנחיות ציבוריות של סוכנות הסייבר האמריקאית ושל המרכז הלאומי לסייבר בבריטניה, ו־4 נהלים לדוגמה של המכללה.
+מאגר הידע כולל 14 מסמכים: 10 מדריכים כלליים שנכתבו לפרויקט על בסיס הנחיות CISA ו־NCSC, ו־4 נהלים לדוגמה של המכללה. אלה אינם נהלים רשמיים.
 
-- **חלוקה לקטעים:** כל סעיף עם כותרת הופך לקטע אחד. כל סעיף נכתב כצעד אחד שעומד בפני עצמו, ולכן חלוקה לפי כותרות שומרת על נהלים ממוספרים שלמים, במקום לחתוך אותם באמצע כמו בחלוקה לפי אורך קבוע. התוצאה: 69 קטעים.
-- **ייצוג מספרי:** מודל חינמי וקטן שרץ על המחשב המקומי, כך שלא צריך מפתח נוסף.
-- **אחסון וקטורי:** מסד הנתונים PostgreSQL עם התוסף pgvector, באותו קונטיינר של שאר הנתונים.
-- **סף רלוונטיות:** שאלות רלוונטיות קיבלו בבדיקות ציון של 0.65 ומעלה, ושאלות לא קשורות קיבלו עד 0.61. לכן נקבע סף של 0.62, ושאלה לא קשורה לא מחזירה מסמכים בכלל. הנהלים של המכללה וההנחיות הכלליות נשלפים בנפרד ומשולבים, כדי שהתשובה תכלול גם את הצעדים של המכללה וגם את העצות הכלליות.
+המסמכים מחולקים לפי כותרות, כדי לשמור כל נוהל ממוספר יחד ולא לחתוך אותו באמצע. בסך הכול יש 69 קטעים. מודל ההטמעה המקומי `BAAI/bge-small-en-v1.5` ממיר אותם לווקטורים, שנשמרים ב־PostgreSQL עם pgvector. אין צורך במפתח API נוסף עבור ההטמעות.
 
-**מודול השפה.** שרשרת אחת שבונה את ההנחיה מההוראות, מעשר ההודעות האחרונות בשיחה (שנשמרות במסד הנתונים ולכן לא נמחקות כשהשרת מופעל מחדש), מתוצאות הכלים ומהמסמכים. התשובה נכתבת על ידי Claude Sonnet. במקרה של תקלה זמנית יש ניסיון חוזר, ואם עדיין יש בעיה, מודל גיבוי (Claude Haiku) עונה במקומו. ההוראות למודל כוללות: צעדים דחופים קודם כשסיסמה אולי נחשפה, לכל היותר שתי שאלות המשך, אף פעם לא לקבוע שמשהו בטוח, לציין מקורות, לענות בשפה של הסטודנט, ולהתייחס לתוכן שהודבק כאל מידע ולא כאל הוראות.
+סף הדמיון לחיפוש הוא 0.62. בשאלות ששימשו לבדיקה, שאלות רלוונטיות קיבלו לפחות 0.65 ושאלות לא קשורות קיבלו עד כ־0.61. הסף נבחר לפי התוצאות האלה, ולכן הוא לא מבטיח שכל שאלה חדשה תסווג באותה הצלחה. הנהלים של המכללה והמדריכים הכלליים נשלפים בנפרד ואז משולבים: שני קטעים מכל קבוצה כשבשתיהן יש התאמות רלוונטיות, והקבוצה השנייה משלימה מקומות פנויים, עד ארבעה קטעים בסך הכול. המקורות וציוני הדמיון מוצגים בתשובה.
 
-**מסד הנתונים.** שומר את השיחות, כל הודעה עם המסלול והסיבה, תיעוד מלא של כל הפעלת כלי, את מאגר הידע, ותוצאות הערכה של הנתב.
+מודול השפה (`server/llm.py`) משתמש בשרשרת LCEL שמחברת את ההוראות, היסטוריית השיחה, תוצאות הכלים והמסמכים שנשלפו. Claude Sonnet כותב את התשובה. עשרת סבבי השיחה האחרונים נטענים ממסד הנתונים, כך שאפשר להמשיך את השיחה גם אחרי הפעלה מחדש של השרת.
 
-**טיפול בשגיאות.** השרת לא קורס בשום מצב: בקשה פגומה מקבלת הודעת שגיאה ברורה, מאגר ידע ריק מוביל לתשובה זהירה, כלי שנכשל מדווח כך, תקלה במודל מובילה לניסיון חוזר ולמודל גיבוי, ומסד נתונים שלא זמין מוביל להודעה עם הוראות.
+אם יש תקלה זמנית, מתבצע ניסיון חוזר. אם Sonnet עדיין נכשל או מחזיר תשובה ריקה, הבקשה עוברת ל־Claude Haiku. אם שני המודלים מחזירים תשובה ריקה, מוצגת הודעה קצרה בעברית או באנגלית שמבקשת את התוכן החשוד או הסבר על מה שקרה. תקלת API שלא נפתרת מחזירה `503`.
+
+ההוראות למודל דורשות להתחיל בצעדים הדחופים כשייתכן שסיסמה נחשפה, לשאול לכל היותר שתי שאלות המשך, לציין מקורות ולענות בשפה של הסטודנט. תוכן שהודבק, מסמכים ותוצאות כלים נחשבים למידע לבדיקה, גם אם מופיעות בהם הוראות לעוזר.
+
+מסד הנתונים שומר שיחות, הודעות, החלטות ניתוב, הפעלות כלים, מסמכים ותוצאות הערכה של הנתב. השרת מטפל בקלט פגום, מאגר ידע ריק, כשל בכלי ותקלות במודל או במסד הנתונים, ומחזיר הודעה מתאימה. בקשות ל־`/chat` מוגבלות כברירת מחדל ל־10 בדקה ו־200 ביום לכל כתובת IP. חריגה מחזירה `429` עם כותרת `Retry-After`.
 
 ### 4. ממשק התקשורת
 
@@ -398,19 +417,22 @@ This project was built with the help of Claude (Anthropic) as a coding assistant
 
 ### 6. בדיקות
 
-הפקודה `python -m pytest` מריצה 28 בדיקות אוטומטיות לשני הכלים ולחלוקה לקטעים. הן לא דורשות מסד נתונים או מפתח.
+הפקודה `python -m pytest` מריצה 40 בדיקות אוטומטיות. הן בודקות את שני הכלים, את חלוקת המסמכים לקטעים, את הטיפול בתשובות ריקות מהמודל ואת הגבלת קצב הבקשות. אין צורך במסד נתונים פעיל או במפתח API כדי להריץ אותן.
+
+צילומי מסך של ההדגמה (אחזור מידע, כלי ותשובה ישירה) ושל ניסיונות התקיפה נמצאים בקובץ [DEMO.md](DEMO.md), באנגלית.
 
 ### 7. מגבלות
 
 - הנהלים של המכללה הם **דוגמאות שנכתבו עבור פרויקט בקורס**, ולא מדיניות רשמית של המכללה האקדמית נתניה. לא נכללו פרטי קשר אמיתיים.
 - הכלים בודקים מבנה בלבד: הם לא רואים את הדף שמאחורי קישור או את התוכן של קובץ מצורף, ולא יכולים להוכיח שהודעה בטוחה.
 - את פרטי המייל שמודבקים אפשר לערוך, ולכן תוצאות האימות אמינות רק כמו המקור שלהן.
-- מאגר הידע והמודל לייצוג מספרי הם באנגלית. שאלות בעברית עובדות כי הנתב כותב שאילתת חיפוש באנגלית.
+- מאגר הידע ומודל ההטמעה הם באנגלית. שאלות בעברית עובדות כי הנתב כותב שאילתת חיפוש באנגלית.
+- אין חשבונות משתמשים, והשיחות נשמרות ללא הגבלת זמן. צריך להביא בחשבון את מגבלות הגישה והפרטיות האלה אם מאפשרים לאחרים להשתמש באפליקציה.
 
 ### 8. מקורות ושימוש בבינה מלאכותית
 
 המדריכים הכלליים נכתבו עבור הפרויקט על בסיס הנחיות ציבוריות של סוכנות הסייבר האמריקאית (CISA) ושל המרכז הלאומי לסייבר בבריטניה (NCSC). הקישורים המלאים מופיעים [בחלק האנגלי](#9-sources-and-ai-use).
 
-הפרויקט נבנה בעזרת Claude של Anthropic כעוזר תכנות. הגרסאות שהוא תרם להן מסומנות בשורה `Co-Authored-By: Claude`.
+בפיתוח הפרויקט נעשה שימוש ב־Claude של Anthropic כעוזר תכנות. קומיטים שבהם הוא השתתף מסומנים בשורה `Co-Authored-By: Claude`. גם בניסוח מחדש של התיעוד נעשה שימוש ב־ChatGPT/Codex.
 
 </div>

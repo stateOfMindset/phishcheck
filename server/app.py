@@ -8,6 +8,7 @@ from psycopg_pool import PoolTimeout
 from werkzeug.exceptions import HTTPException
 
 from server import config, db, pipeline
+from server.ratelimit import RateLimiter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("phishcheck")
@@ -26,8 +27,10 @@ def parse_session_id(raw) -> uuid.UUID | None:
         return None
 
 
-def create_app() -> Flask:
+def create_app(limiter: RateLimiter | None = None) -> Flask:
     app = Flask(__name__, static_folder=None)
+    chat_limiter = limiter or RateLimiter([(config.RATE_LIMIT_PER_MINUTE, 60),
+                                           (config.RATE_LIMIT_PER_DAY, 24 * 60 * 60)])
 
     # ------------------------------------------------------------------ client
     @app.get("/")
@@ -74,6 +77,16 @@ def create_app() -> Flask:
             return error(400, "Field 'message' must be a non-empty string.")
         if len(message) > MAX_MESSAGE_CHARS:
             return error(400, f"Message is too long (max {MAX_MESSAGE_CHARS} characters).")
+
+        # Checked after validation: malformed requests are rejected for free and should not
+        # use up a client's budget; only requests that will call Claude count.
+        retry_after = chat_limiter.check(request.remote_addr or "unknown")
+        if retry_after is not None:
+            log.warning("Rate limit hit for %s; retry in %ss", request.remote_addr, retry_after)
+            response, status = error(
+                429, f"Too many messages. Please wait {retry_after} seconds and try again.")
+            response.headers["Retry-After"] = str(retry_after)
+            return response, status
 
         return jsonify(pipeline.run(session_id, message.strip()))
 

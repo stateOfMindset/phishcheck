@@ -62,12 +62,14 @@
       .replace(/\[(\d{1,2})\]/g, '<span class="cite">[$1]</span>');
   }
 
-  // Small, safe Markdown subset: paragraphs, headings, bullet/numbered lists, rules.
+  // Small, safe Markdown subset: paragraphs, headings, bullet/numbered lists, rules and fenced
+  // code blocks. The whole text is HTML-escaped first, so nothing in an answer can become markup.
   function renderMarkdown(source) {
     const lines = escapeHtml(source).split(/\r?\n/);
     let html = "";
     let list = null;      // "ul" | "ol" | null
     let paragraph = [];
+    let code = null;      // lines of the open ``` block, or null
 
     const flushParagraph = () => {
       if (paragraph.length) html += `<p>${inline(paragraph.join("<br>"))}</p>`;
@@ -81,6 +83,13 @@
     for (const raw of lines) {
       const line = raw.trimEnd();
       let m;
+      // Fenced code: keep the lines exactly as written (indentation, '#' comments), no Markdown.
+      if (/^\s*```/.test(line)) {
+        if (code === null) { flushParagraph(); closeList(); code = []; }
+        else { html += `<pre dir="ltr"><code>${code.join("\n")}</code></pre>`; code = null; }
+        continue;
+      }
+      if (code !== null) { code.push(raw); continue; }
       if (!line.trim()) { flushParagraph(); closeList(); continue; }
       if (/^\s*(---|\*\*\*)\s*$/.test(line)) { flushParagraph(); closeList(); html += "<hr>"; continue; }
       if ((m = line.match(/^\s*#{1,4}\s+(.*)$/))) {
@@ -99,6 +108,7 @@
       closeList();
       paragraph.push(line);
     }
+    if (code !== null) html += `<pre dir="ltr"><code>${code.join("\n")}</code></pre>`;  // unclosed fence
     flushParagraph();
     closeList();
     return html;
@@ -121,6 +131,7 @@
     wrap.appendChild(bubble);
     chat.appendChild(wrap);
     scrollToBottom();
+    return wrap;
   }
 
   function routeMeta(data) {
@@ -189,7 +200,7 @@
 
   const reducedMotion = window.matchMedia &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const BLOCKS = "p, li, h4";
+  const BLOCKS = "p, li, h4, pre";
   const MAX_FRAMES = 150;   // the whole answer is typed out in at most ~2.5 s at 60 fps
 
   function nearBottom() {
@@ -254,7 +265,8 @@
     }
     const bubble = el("div", "bubble");
     bubble.dir = "auto";
-    bubble.innerHTML = renderMarkdown(data.answer || "");
+    // Safety net: an empty answer should never reach here, but a blank bubble looks broken.
+    bubble.innerHTML = renderMarkdown(data.answer || "*(No answer was returned. Please try again.)*");
     wrap.appendChild(bubble);
     chat.appendChild(wrap);
     scrollToBottom();
@@ -274,6 +286,43 @@
     const wrap = el("div", "msg assistant error");
     wrap.appendChild(el("div", "bubble", text));
     chat.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  // ------------------------------------------------------------------ rate-limit cooldown
+  // After a 429 the server says how long to wait (Retry-After). Count it down live and keep
+  // Send disabled until then, instead of showing a number that is out of date a second later.
+  let cooldownUntil = 0;
+  let cooldownNotice = null;
+
+  function coolingDown() {
+    return Date.now() < cooldownUntil;
+  }
+
+  function startCooldown(seconds) {
+    cooldownUntil = Date.now() + seconds * 1000;
+    if (cooldownNotice) cooldownNotice.remove();
+    const wrap = el("div", "msg assistant error");
+    const bubble = el("div", "bubble");
+    wrap.appendChild(bubble);
+    chat.appendChild(wrap);
+    cooldownNotice = wrap;
+    sendButton.disabled = true;
+
+    const tick = () => {
+      const left = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      if (left > 0) {
+        bubble.textContent = `Too many messages. You can send again in ${left}s. ` +
+          "Your message is back in the box below.";
+        return;
+      }
+      clearInterval(timer);
+      wrap.classList.remove("error");
+      bubble.textContent = "You can send messages again.";
+      if (!busy) sendButton.disabled = false;
+    };
+    const timer = setInterval(tick, 250);
+    tick();
     scrollToBottom();
   }
 
@@ -305,7 +354,10 @@
     let body = null;
     try { body = await response.json(); } catch (_) { /* non-JSON error page */ }
     if (!response.ok) {
-      throw new Error((body && body.error) || `The server returned an error (${response.status}).`);
+      const err = new Error((body && body.error) || `The server returned an error (${response.status}).`);
+      err.status = response.status;
+      err.retryAfter = parseInt(response.headers.get("Retry-After"), 10) || null;
+      throw err;
     }
     return body;
   }
@@ -342,16 +394,16 @@
       addError(err.message);
     } finally {
       busy = false;
-      sendButton.disabled = false;
+      sendButton.disabled = coolingDown();
     }
   }
 
   async function send(text) {
     const message = text.trim();
-    if (!message || busy) return;
+    if (!message || busy || coolingDown()) return;
     busy = true;
     sendButton.disabled = true;
-    addUserMessage(message);
+    const userBubble = addUserMessage(message);
     input.value = "";
     autoResize();
     const stopTyping = addTyping();
@@ -365,10 +417,18 @@
       await addAssistantMessage(data, true);
     } catch (err) {
       stopTyping();
-      addError(err.message);
+      if (err.status === 429) {
+        // The server rejected the message without saving it: take its bubble away and put the
+        // text back in the box so it can be sent once the countdown ends.
+        userBubble.remove();
+        if (!input.value) { input.value = message; autoResize(); }
+        startCooldown(err.retryAfter || 60);
+      } else {
+        addError(err.message);
+      }
     } finally {
       busy = false;
-      sendButton.disabled = false;
+      sendButton.disabled = coolingDown();
       input.focus();
     }
   }

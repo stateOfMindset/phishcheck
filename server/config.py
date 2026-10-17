@@ -42,5 +42,10 @@ CLIENT_DIR = PROJECT_ROOT / "client"
 
 FLASK_PORT = int(os.getenv("FLASK_PORT", "5000"))
 
+# Rate limit for POST /chat, per client IP. Each message costs 2-3 Claude API calls.
+# Set a value to 0 to disable that limit.
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
+RATE_LIMIT_PER_DAY = int(os.getenv("RATE_LIMIT_PER_DAY", "200"))
+
 # Conversation memory: how many past turns are sent to the model with each request.
 HISTORY_TURNS = 10

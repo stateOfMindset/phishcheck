@@ -198,6 +198,21 @@ h1 { font-size: 18px; margin: 0; line-height: 1.2; }
   padding: 1px 5px;
 }
 .bubble hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.bubble pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-x: auto;
+  text-align: left;
+}
+.bubble pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  white-space: pre;
+}
 .cite { color: var(--accent); font-size: 12px; font-weight: 600; vertical-align: super; }
 
 .error .bubble { border-color: var(--high); background: var(--high-bg); color: var(--text); }
