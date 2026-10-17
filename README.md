@@ -215,7 +215,7 @@ Response:
 
 ```bash
 # 1. Get the code
-git clone <repository-url> phishcheck
+git clone https://github.com/stateOfMindset/phishcheck.git
 cd phishcheck
 
 # 2. Configuration: copy the template, then edit .env
